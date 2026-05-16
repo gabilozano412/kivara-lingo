@@ -153,10 +153,22 @@ export async function createCardFromRequest(
     }
   }
 
-  // Audio — either supplied by content or pulled from the offscreen rolling buffer.
+  // Audio — either supplied by content or pulled from the offscreen rolling
+  // buffer. We resolve `tabCapture` and `tts` field sources separately so the
+  // user understands which path was used:
+  //   - tabCapture: take the real actor's voice from the playing video. This
+  //     is the canonical path ("audio del video mismo"). Falls back to TTS
+  //     only if the user *also* mapped a tts-source field.
+  //   - tts: play synthetic audio via chrome.tts / SpeechSynthesis at review
+  //     time using Anki's built-in {{tts:..}} field syntax. We don't bake the
+  //     audio into a media file because the Web Speech API doesn't expose
+  //     audio bytes — instead we leave the text value in the field so the
+  //     user's Anki template (`{{tts en_US:FieldName}}`) can speak it.
   const audios: AnkiMedia[] = [];
-  const audioField = fieldMapping.find(([, s]) => s === 'tabCapture' || s === 'tts')?.[0];
-  if (audioField) {
+  const tabCaptureField = fieldMapping.find(([, s]) => s === 'tabCapture')?.[0];
+  const ttsField = fieldMapping.find(([, s]) => s === 'tts')?.[0];
+
+  if (tabCaptureField) {
     const resolved = await resolveAudio(request, capture);
     if (resolved) {
       const filename = safeFilename(request.token, extForMime(resolved.mime));
@@ -169,14 +181,34 @@ export async function createCardFromRequest(
         audios.push({
           filename,
           data: dataUrlToBase64(resolved.dataUrl),
-          fields: [audioField],
+          fields: [tabCaptureField],
         });
       } catch (err) {
         const reason = err instanceof Error ? err.message : 'audio';
-        warnings.push(`No se pudo guardar el audio: ${reason}`);
+        warnings.push(`No se pudo guardar el audio del video: ${reason}`);
       }
     } else if (getAudioCaptureStatus().active === false) {
-      warnings.push('La captura de audio no está activa — no se adjuntó audio.');
+      // Real-voice capture is the user's primary intent; we don't silently
+      // substitute synthetic audio because that would mislead them into
+      // thinking the card has the actor's voice. The TTS field (if any)
+      // still gets populated below.
+      warnings.push(
+        'La captura de audio del video no está activa — actívala desde el popup para grabar la voz real.',
+      );
+    } else {
+      warnings.push('No se pudo extraer audio del video para este rango.');
+    }
+  }
+
+  if (ttsField) {
+    // Surface the source text in the field so the user's Anki template can
+    // call {{tts <lang>:<FieldName>}} to speak it during review. We attach
+    // the cue sentence by default so the synthetic audio always has full
+    // context; if the user prefers single-word TTS they can map the field
+    // accordingly and we'll respect it.
+    const ttsText = request.sentence?.trim() || request.token;
+    if (ttsText) {
+      fields[ttsField] = ttsText;
     }
   }
 

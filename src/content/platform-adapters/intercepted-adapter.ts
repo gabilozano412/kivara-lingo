@@ -10,7 +10,11 @@ import type { CueListener, SubtitleCue, SubtitleSource } from './types';
 
 export interface InterceptedAdapterOptions {
   platform: SubtitleSource['platform'];
-  /** BCP-47 language tag for cues (best-guess; Phase 3: parse from manifest) */
+  /**
+   * BCP-47 language tag for cues. Best-guess from the adapter; the MAIN-world
+   * interceptor doesn't currently parse the language from the HLS/DASH manifest
+   * so most platforms hard-code 'en'.
+   */
   language: string;
   /** CSS to inject in document head to hide the native subtitle layer */
   hideNativeCss?: string;

@@ -66,6 +66,31 @@ export function App({ adapter, videoElement, videoOverlayRoot }: AppProps) {
     };
   }, [cleanup.hideUI, cleanup.hideShadows, adapter?.platform, enabled]);
 
+  // When the user enables Kivara on a page with a <video>, ask the background
+  // to start tabCapture so the rolling audio buffer is populated by the time
+  // they save their first card. This is best-effort — if the user hasn't
+  // recently interacted with the page Chrome may reject the request, in which
+  // case the popup's Start button is still available as a manual entrypoint.
+  useEffect(() => {
+    if (!enabled || !videoElement) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = (await sendMessage('AUDIO_CAPTURE_STATUS', {}, 'background')) as {
+          active?: boolean;
+        };
+        if (cancelled || status?.active) return;
+        await sendMessage('START_AUDIO_CAPTURE', {}, 'background');
+      } catch {
+        // Permissions / user-gesture errors are non-fatal — silently fall back
+        // to the popup-driven flow.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, videoElement]);
+
   // Sync dark mode on hosts + overlay root so theme.css `.dark` selector works.
   useEffect(() => {
     const mainHost = document.getElementById('kivara-lingo-host');
@@ -299,12 +324,9 @@ export function App({ adapter, videoElement, videoOverlayRoot }: AppProps) {
             mapping={ankiMapping}
             setMapping={setAnkiMapping}
             mockData={{
-              // Until Phase 3 wires dictionary/translation lookup to the live
-              // cue, the preview falls back to a deterministic placeholder so
-              // FRENTE / REVERSO actually render something (instead of an
-              // empty dark card). The live cue text still feeds
-              // `targetSentence` when present so the user sees their current
-              // line in REVERSO.
+              // The preview uses the live cue text when available and falls
+              // back to a deterministic placeholder so FRENTE / REVERSO
+              // always render something (instead of an empty dark card).
               targetSentence: activeCue?.text || "These days, Nicola doesn't travel much.",
               nativeSentence: 'Estos días, Nicola no viaja mucho.',
               word: 'these days',
